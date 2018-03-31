@@ -1,0 +1,182 @@
+<html>
+    <head>
+        <meta charset="utf8"/>
+        <script   src="https://code.jquery.com/jquery-1.12.4.js"   integrity="sha256-Qw82+bXyGq6MydymqBxNPYTaUXXq7c8v3CwiYwLLNXU="   crossorigin="anonymous"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/xlsx.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/jszip.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/xls/0.7.4-a/xls.js"></script>
+
+        <script type="text/javascript">
+            var oFileIn;
+            var base1;
+            var kibanaUri = 'http://es.ops.lzd.co/{0}/_search';
+            $(function() {
+                oFileIn = document.getElementById('my_file_input');
+                if(oFileIn.addEventListener) {
+                    oFileIn.addEventListener('change', filePicked, false);
+                }
+            });
+
+
+            function filePicked(oEvent) {
+                // Get The File From The Input
+                var oFile = oEvent.target.files[0];
+                var sFilename = oFile.name;
+                // Create A File Reader HTML5
+                var reader = new FileReader();
+
+                // Ready The Event For When A File Gets Selected
+                reader.onload = function(e) {
+                    var data = e.target.result;
+                    var cfb = XLS.CFB.read(data, {type: 'binary'});
+                    var wb = XLS.parse_xlscfb(cfb);
+                    // Loop Over Each Sheet
+                    wb.SheetNames.forEach(function(sheetName) {
+                        // Obtain The Current Row As CSV
+                        var sCSV = XLS.utils.make_csv(wb.Sheets[sheetName]);
+                        var obj = XLS.utils.sheet_to_row_object_array(wb.Sheets[sheetName]);
+                        base1=obj;
+                        shtml="<table border='1'>";
+                        shtml+="<tr style='background-color:yellow;'><td>Order #</td><td>RN</td><td>Tracking Number</td></tr>";
+                        $.each(obj, function(i, val) {
+                            shtml+="<tr>";
+                            shtml+="<td>"+val.order+"</td>";
+                            shtml+="<td>"+val.rn+"</td>";
+                            shtml+="<td>"+val.tracking_number+"</td>";
+                            shtml+="</tr>";
+                        });
+                        shtml+="</table>";
+                        $("#my_file_output").html(shtml);
+                    });
+                };
+
+                // Tell JS To Start Reading The File.. You could delay this if desired
+                reader.readAsBinaryString(oFile);
+            }
+
+            function exportToCsv(filename, rows) {
+                var processRow = function (row) {
+                    var finalVal = '';
+                    for (var j = 0; j < row.length; j++) {
+                        var innerValue = row[j] === null ? '' : "" + row[j];
+                        if (row[j] instanceof Date) {
+                            innerValue = row[j].toLocaleString();
+                        };
+                        var result = innerValue.replace(/"/g, '""');
+                        if (result.search(/("|,|\n)/g) >= 0)
+                            result = '"' + result + '"';
+                        if (j > 0)
+                            finalVal += ',';
+                        finalVal += result;
+                    }
+                    return finalVal + '\n';
+                };
+
+                var csvFile = '';
+                for (var i = 0; i < rows.length; i++) {
+                    csvFile += processRow(rows[i]);
+                }
+
+                var blob = new Blob([csvFile], { type: 'text/csv;charset=utf-8;' });
+                if (navigator.msSaveBlob) { // IE 10+
+                    navigator.msSaveBlob(blob, filename);
+                } else {
+                    var link = document.createElement("a");
+                    if (link.download !== undefined) { // feature detection
+                        // Browsers that support HTML5 download attribute
+                        var url = URL.createObjectURL(blob);
+                        link.setAttribute("href", url);
+                        link.setAttribute("download", filename);
+                        link.style.visibility = 'hidden';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    }
+                }
+            }
+
+            async function getLogFromService(serviceName, params) {
+                url = kibanaUri.replace("{0}", serviceName);
+                queryString = "\"" + params.join("\" AND \"") + "\"";
+                body = {
+                    "query": {
+                        "bool": {
+                        "must": [
+                            {
+                                "query_string": {
+                                    "query": "\"package_created\"",
+                                    "analyze_wildcard": true
+                                }
+                            }
+                        ]
+                        }
+                    }
+                };
+                const dataset = await $.ajax({
+                    url: url,
+                    type: 'get',
+                    data: body,
+                });
+
+                return dataset;
+            }
+
+            function handle() {
+                var textarray=[];
+                textarray[0]=["Order #","RN","Tracking Number","From","To"];
+
+                source1=base1;
+                outputRowIndex=1;
+                $.each(source1, async function(i, val) {
+                    try {
+                        service1Log = await getLogFromService("platform-app-*", ["package_created"]);
+                    } catch(error) {
+                        console.log(error);
+                    }
+
+                    //if don't exsit on service 1
+                        //status is not_existing_in_1
+                    //service2Log = await getLogFromService("rms-app-*", [val.order]);
+                    //If exist service 1 don't exist in service 2
+                        //status is not_existing_in_2
+                    //If exist service 1 and exist in service 2
+                        //status is existing_both
+
+                    textarray[outputRowIndex] = [
+                        val.order,
+                        val.rn,
+                        val.tracking_number,
+                        "return service",
+                        "RMS"
+                    ];
+                });
+                //return textarray;
+            }
+
+            $(document).ready(function(){
+                $("#exportCsv").click(function(){
+                    textarray = handle();
+                    exportToCsv("test.xls",textarray);
+                });
+            });
+        </script>
+    </head>
+    <body>
+        <div style="margin-bottom:10px;overflow: hidden;">
+            <div style="with:65%; float:left;">
+                Source file: &nbsp;&nbsp;&nbsp;&nbsp;<input type="file" id="my_file_input" />
+                <br/>
+                <h3>The contain of source file:</h3>
+                <div id='my_file_output'></div>
+            </div>
+            <div style="with:30%; float:left; padding-left:50px;">
+                <b>Kibana Filter:</b><br/>
+                <label>Request From (Service):</label><input type="text" id="fromSystem" /><br/><br/>
+                <label>Request To (Service):</label><input type="text" id="toSystem" /><br/>
+                <br/>
+                <span id="exportCsv" style=";color: #fff;background-color: #7dc855;border-color: #7dc855;border:1px solid;padding:5px;">Export CSV</span>
+                <span id="exportSQL" style=";color: #000;background-color: yellow;border-color: #7dc855;border:1px solid;padding:5px;">Export SQL</span>
+            </div>
+        </div>
+    </body>
+</html>
